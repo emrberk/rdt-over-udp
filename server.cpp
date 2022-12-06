@@ -12,8 +12,6 @@
 #include <climits>
 #include "threads.h"
 
-#define MYPORT "4950"    // the port users will be connecting to
-
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -29,14 +27,14 @@ int main(int argc, char** argv)
     int sockfd;
     struct addrinfo hints, *servinfo, *p;
     int rv;
-    char* clientAddressStr = argv[1];
+    char* port = argv[1];
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_INET; // set to AF_INET to use IPv4
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_flags = AI_PASSIVE;
 
-    if ((rv = getaddrinfo(NULL, MYPORT, &hints, &servinfo)) != 0) {
+    if ((rv = getaddrinfo(NULL, port, &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
@@ -62,10 +60,6 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    for (int i = 0; i < WINDOW_SIZE; i++) {
-        retVals[i] = INIT;
-    }
-
     for (auto& mutex : mutexCells) {
         mutex.lock();
     }
@@ -83,12 +77,11 @@ int main(int argc, char** argv)
         perror("Error on recvfrom");
         exit(-1);
     }
+    delete[] buf;
+
     std::thread listenerThread(listener, sockfd);
 
-    for (int i = 0; i < WINDOW_SIZE; i++) {
-        std::thread* senderThread = new std::thread(sender, sockfd, i, retVals + i, nullptr);
-        senderThreads.push_back(senderThread);
-    }
+    std::thread senderThread(sender, sockfd);
 
     while (true) {
         std::string input;
@@ -110,21 +103,18 @@ int main(int argc, char** argv)
         }
 
         int sequenceNumber = availableSequenceNumber;
-        Packet p = Packet(sequenceNumber, (int) chunks.size(), true);
-        packetCells[sequenceNumber] = p;
+        Packet* ptr = new Packet(sequenceNumber, (int) chunks.size(), true);
+        packetCells[sequenceNumber] = ptr;
         availableSequenceNumber = availableSequenceNumber == MAX_SEQUENCE - 1 ? 0 : availableSequenceNumber + 1;
         mutexCells[sequenceNumber].unlock();
 
-        std::cout << "input is " << input << "len = " << inputSize << " and #chunks = " << chunks.size() << std::endl;
         for (int i = 0; i < chunks.size(); i++) {
             sequenceNumber = availableSequenceNumber;
             std::string chunk = chunks[i];
             bool end = i == chunks.size() - 1;
-            Packet p = Packet(sequenceNumber, chunk, end);
-            if (end) {
-                std::cout << "end chunk #" << i << " and content = " << chunk << std::endl;
-            }
-            packetCells[sequenceNumber] = p;
+            Packet* ptr2 = new Packet(sequenceNumber, chunk, end);
+
+            packetCells[sequenceNumber] = ptr2;
             availableSequenceNumber = availableSequenceNumber == MAX_SEQUENCE - 1 ? 0 : availableSequenceNumber + 1;
             mutexCells[sequenceNumber].unlock();
         }
@@ -132,9 +122,7 @@ int main(int argc, char** argv)
 
     listenerThread.join();
 
-    for (auto& thread : senderThreads) {
-        thread->join();
-    }
+    senderThread.join();
 
     freeaddrinfo(servinfo);
 

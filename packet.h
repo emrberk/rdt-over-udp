@@ -30,6 +30,9 @@ public:
         this->end = end;
         this->isSent = false;
     }
+    ~Packet() {
+        this->data.erase();
+    }
 
     Packet(unsigned short sequenceNumber, bool isACK) {
         this->sequenceNumber = sequenceNumber;
@@ -55,18 +58,13 @@ public:
         this->sequenceNumber = *seqStart;
 
         this->end = *endFlagStart;
-
-        isSent = false;
-        rawPacket = nullptr;
     }
 
     Packet(unsigned short sequenceNumber, int numPackets, bool isInfo) {
         this->sequenceNumber = sequenceNumber;
-        std::cout << "make packet pgetdata = " << std::to_string(numPackets) << std::endl;
         data = std::to_string(numPackets);
         isACK = true;
         end = true;
-        isSent = true;
     }
 
     void* getRawPacket(char* rawPacket) {

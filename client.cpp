@@ -14,8 +14,6 @@
 #include <climits>
 #include "threads.h"
 
-#define SERVERPORT "4950"    // the port users will be connecting to
-
 void *get_in_addr(struct sockaddr *sa)
 {
     if (sa->sa_family == AF_INET) {
@@ -32,21 +30,15 @@ int main(int argc, char** argv)
     int addressInfo;
     int numbytes;
 
-    std::cout << argc << argv[0] << argv[1] << std::endl;
-
-    if (argc != 2) {
-        fprintf(stderr,"Provide hostname\n");
-        exit(1);
-    }
-
-    char* destinationAddress = argv[1];
+    char* address = argv[1];
+    char* port = argv[2];
 
     memset(&hints, 0, sizeof hints);
 
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
 
-    if ((addressInfo = getaddrinfo(destinationAddress, SERVERPORT, &hints, &servinfo)) != 0) {
+    if ((addressInfo = getaddrinfo(address, port, &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(addressInfo));
         return -1;
     }
@@ -58,24 +50,12 @@ int main(int argc, char** argv)
             perror("talker: socket");
             continue;
         }
-        /*
-        if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-            close(sockfd);
-            perror("listener: bind");
-            continue;
-        }
-        */
-
         break;
     }
 
     if (p == NULL) {
         fprintf(stderr, "talker: failed to create socket\n");
         return 2;
-    }
-
-    for (int i = 0; i < WINDOW_SIZE; i++) {
-        retVals[i] = INIT;
     }
 
     for (auto& mutex : mutexCells) {
@@ -97,10 +77,7 @@ int main(int argc, char** argv)
 
     std::thread listenerThread(listener, sockfd);
 
-    for (int i = 0; i < WINDOW_SIZE; i++) {
-        std::thread* senderThread = new std::thread(sender, sockfd, i, retVals + i, p);
-        senderThreads.push_back(senderThread);
-    }
+    std::thread senderThread(sender, sockfd);
 
     while (true) {
         std::string input;
@@ -121,21 +98,19 @@ int main(int argc, char** argv)
             chunks.push_back(chunk);
         }
         int sequenceNumber = availableSequenceNumber;
-        Packet p = Packet(sequenceNumber, chunks.size(), true);
-        packetCells[sequenceNumber] = p;
+        Packet* ptr = new Packet(sequenceNumber, chunks.size(), true);
         availableSequenceNumber = availableSequenceNumber == MAX_SEQUENCE - 1 ? 0 : availableSequenceNumber + 1;
+        packetCells[sequenceNumber] = ptr;
+
         mutexCells[sequenceNumber].unlock();
 
-        std::cout << "input is " << input << "len = " << inputSize << " and #chunks = " << chunks.size() << std::endl;
         for (int i = 0; i < chunks.size(); i++) {
             sequenceNumber = availableSequenceNumber;
             std::string chunk = chunks[i];
             bool end = i == chunks.size() - 1;
-            Packet p = Packet(sequenceNumber, chunk, end);
-            if (end) {
-                std::cout << "end chunk #" << i << " and content = " << chunk << std::endl;
-            }
-            packetCells[sequenceNumber] = p;
+            Packet* ptr2 = new Packet(sequenceNumber, chunk, end);
+
+            packetCells[sequenceNumber] = ptr2;
             availableSequenceNumber = availableSequenceNumber == MAX_SEQUENCE - 1 ? 0 : availableSequenceNumber + 1;
             mutexCells[sequenceNumber].unlock();
         }
@@ -143,9 +118,7 @@ int main(int argc, char** argv)
 
     listenerThread.join();
 
-    for (auto& thread : senderThreads) {
-        thread->join();
-    }
+    senderThread.join();
 
     freeaddrinfo(servinfo);
     close(sockfd);
